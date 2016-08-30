@@ -13,91 +13,85 @@ require_once 'jira_markdown.php';
 $dotenv = new Dotenv\Dotenv(__DIR__);
 $dotenv->load();
 
-if (!isset($argv[1])) {
-    printf("Missing argument: Project Key\n");
-    exit(1);
-}
+$projectMapping = require 'projects.php';
 
-$project = $argv[1];
-$projects = require 'projects.php';
 $client = new \Buzz\Browser();
 
-if (!isset($projects[$project])) {
-    printf("Unknown project: $project\n");
-    exit(2);
-}
+foreach ($projectMapping as $currentProject => $mapping) {
 
-$githubRepository = $projects[$project];
-$githubHeaders = [
-    'User-Agent: Doctrine Jira Migration',
-    'Authorization: token ' . $_SERVER['GITHUB_TOKEN'],
-    'Accept: application/vnd.github.golden-comet-preview+json'
-];
-$jiraHeaders = ['Authorization: Basic ' . base64_encode(sprintf('%s:%s', $_SERVER['JIRA_USER'], $_SERVER['JIRA_PASSWORD']))];
+    $githubRepository = $mapping[0];
+    $jiraProject = $mapping[1];
+    $componentName = $mapping[2];
 
-$ticketStatus = [];
-if (file_exists('data/' . $project . '.status.json')) {
-    $ticketStatus = json_decode(file_get_contents('data/' . $project . '.status.json'), true);
-}
+    $githubHeaders = [
+        'User-Agent: Doctrine Jira Migration',
+        'Authorization: token ' . $_SERVER['GITHUB_TOKEN'],
+        'Accept: application/vnd.github.golden-comet-preview+json'
+    ];
+    $jiraHeaders = ['Authorization: Basic ' . base64_encode(sprintf('%s:%s', $_SERVER['JIRA_USER'], $_SERVER['JIRA_PASSWORD']))];
 
-$files = scandir('data/' . $project);
+    $ticketStatus = [];
+    if (file_exists('data/' . $currentProject . '.status.json')) {
+        $ticketStatus = json_decode(file_get_contents('data/' . $currentProject . '.status.json'), true);
+    }
 
-if (isset($argv[2])) {
-    $files = [$argv[2] . ".json"];
-}
+    $files = scandir('data/' . $currentProject);
 
-$count = 0;
-foreach ($files as $file) {
-    if ($file === "." || $file === "..") continue;
+    // $files = array_slice($files, 0, 5);
 
-    $issueKey = str_replace('.json', '', $file);
-    $issue = json_decode(file_get_contents('data/' . $project . '/' . $file), true);
+    $count = 0;
+    foreach ($files as $file) {
+        if ($file === "." || $file === "..") continue;
 
-    printf("Preparing %s... ", $issueKey);
+        $issueKey = str_replace('.json', '', $file);
+        $issue = json_decode(file_get_contents('data/' . $currentProject . '/' . $file), true);
 
-    if (isset($ticketStatus[$issueKey])) {
-        if ($ticketStatus[$issueKey]['status'] === 'pending') {
-            printf("pending, skipped\n");
-            continue;
-            $response = $client->get($ticketStatus[$issueKey]['url'], $githubHeaders);
+        printf("Preparing %s... ", $issueKey);
 
-            if ($response->getStatusCode() == 200) {
-                $ticketStatus[$issueKey] = json_decode($response->getContent(), true);
-                file_put_contents("data/" . $project . ".status.json", json_encode($ticketStatus, JSON_PRETTY_PRINT));
-                printf("updated status... ");
+        if (isset($ticketStatus[$issueKey])) {
+            if ($ticketStatus[$issueKey]['status'] === 'pending') {
+                printf("pending, skipped\n");
+                continue;
+                $response = $client->get($ticketStatus[$issueKey]['url'], $githubHeaders);
+
+                if ($response->getStatusCode() == 200) {
+                    $ticketStatus[$issueKey] = json_decode($response->getContent(), true);
+                    file_put_contents("data/" . $currentProject . ".status.json", json_encode($ticketStatus, JSON_PRETTY_PRINT));
+                    printf("updated status... ");
+                }
+            }
+
+            if ($ticketStatus[$issueKey]['status'] === 'pending') {
+                printf("pending, skipped\n");
+                continue;
+            }
+
+            if ($ticketStatus[$issueKey]['status'] === 'imported') {
+                printf("imported, skipped\n");
+                continue;
+            }
+
+            if ($ticketStatus[$issueKey]['status'] === 'failed') {
+                printf("Error importing, retry... ", $issueKey);
             }
         }
+        //printf("debug skip\n"); continue;
 
-        if ($ticketStatus[$issueKey]['status'] === 'pending') {
-            printf("pending, skipped\n");
-            continue;
+        $response = $client->post('https://api.github.com/repos/johannessteu/' . $githubRepository . '/import/issues', $githubHeaders, json_encode($issue));
+
+        if ($response->getStatusCode() >= 400) {
+            printf("Error: " . $response->getContent());
+            exit;
         }
 
-        if ($ticketStatus[$issueKey]['status'] === 'imported') {
-            printf("imported, skipped\n");
-            continue;
+        $ticketStatus[$issueKey] = json_decode($response->getContent(), true);
+        file_put_contents("data/" . $currentProject . ".status.json", json_encode($ticketStatus, JSON_PRETTY_PRINT));
+        printf("imported %s\n", $issueKey);
+
+        $count++;
+
+        if (($count % 10) === 0) {
+            //exit;
         }
-
-        if ($ticketStatus[$issueKey]['status'] === 'failed') {
-            printf("Error importing, retry... ", $issueKey);
-        }
-    }
-    //printf("debug skip\n"); continue;
-
-    $response = $client->post('https://api.github.com/repos/doctrine/' . $githubRepository . '/import/issues', $githubHeaders, json_encode($issue));
-
-    if ($response->getStatusCode() >= 400) {
-        printf("Error: " . $response->getContent());
-        exit;
-    }
-
-    $ticketStatus[$issueKey] = json_decode($response->getContent(), true);
-    file_put_contents("data/" . $project . ".status.json", json_encode($ticketStatus, JSON_PRETTY_PRINT));
-    printf("imported %s\n", $issueKey);
-
-    $count++;
-
-    if (($count % 10) === 0) {
-        //exit;
     }
 }
