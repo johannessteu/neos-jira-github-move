@@ -78,7 +78,11 @@ foreach ($projectsMapping as $currentProject => $mapping) {
         'wbehncke' => 'grebaldi',
         'astehlik' => 'astehlik',
         'SoulCover' => 'ComiR',
-        'rafael.k' => 'RafaelKa'
+        'rafael.k' => 'RafaelKa',
+        'sebobo' => 'sebobo',
+        'kdambekalns' => 'kdambekalns',
+        'dimaip' => 'dimaip',
+        'sebobo' => 'sebobo'
     ];
 
     while (true) {
